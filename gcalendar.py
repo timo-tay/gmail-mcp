@@ -89,6 +89,90 @@ class CalendarService:
         ).execute()
         return self._parse_event(event)
 
+    # ------------------------------------------------------------------ create / update / delete
+
+    def create_event(
+        self,
+        summary: str,
+        start: str,
+        end: str,
+        description: str = "",
+        location: str = "",
+        attendees: Optional[List[str]] = None,
+        calendar_id: str = "primary",
+        all_day: bool = False,
+    ) -> Dict[str, Any]:
+        if all_day:
+            event_body: Dict[str, Any] = {
+                "summary": summary,
+                "start": {"date": start},
+                "end": {"date": end},
+            }
+        else:
+            event_body = {
+                "summary": summary,
+                "start": {"dateTime": start},
+                "end": {"dateTime": end},
+            }
+
+        if description:
+            event_body["description"] = description
+        if location:
+            event_body["location"] = location
+        if attendees:
+            event_body["attendees"] = [{"email": email} for email in attendees]
+
+        event = self.service.events().insert(
+            calendarId=calendar_id, body=event_body, sendUpdates="all"
+        ).execute()
+        return self._parse_event(event)
+
+    def update_event(
+        self,
+        event_id: str,
+        calendar_id: str = "primary",
+        summary: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        description: Optional[str] = None,
+        location: Optional[str] = None,
+        attendees: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        existing = self.service.events().get(
+            calendarId=calendar_id, eventId=event_id
+        ).execute()
+
+        if summary is not None:
+            existing["summary"] = summary
+        if description is not None:
+            existing["description"] = description
+        if location is not None:
+            existing["location"] = location
+        if start is not None:
+            is_all_day = "date" in existing.get("start", {}) and "dateTime" not in existing.get("start", {})
+            if is_all_day:
+                existing["start"] = {"date": start}
+            else:
+                existing["start"] = {"dateTime": start}
+        if end is not None:
+            is_all_day = "date" in existing.get("end", {}) and "dateTime" not in existing.get("end", {})
+            if is_all_day:
+                existing["end"] = {"date": end}
+            else:
+                existing["end"] = {"dateTime": end}
+        if attendees is not None:
+            existing["attendees"] = [{"email": email} for email in attendees]
+
+        event = self.service.events().update(
+            calendarId=calendar_id, eventId=event_id, body=existing, sendUpdates="all"
+        ).execute()
+        return self._parse_event(event)
+
+    def delete_event(self, event_id: str, calendar_id: str = "primary") -> None:
+        self.service.events().delete(
+            calendarId=calendar_id, eventId=event_id, sendUpdates="all"
+        ).execute()
+
     # ------------------------------------------------------------------ internals
 
     def _parse_event(self, event: Dict[str, Any]) -> Dict[str, Any]:

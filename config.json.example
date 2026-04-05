@@ -9,5 +9,6 @@
       "description": "Work account"
     }
   },
-  "credentials_dir": "./credentials"
+  "credentials_dir": "./credentials",
+  "attachments_dir": "./attachments"
 }

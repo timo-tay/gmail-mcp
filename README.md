@@ -7,6 +7,7 @@ A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server t
 - **Multiple accounts** — connect as many Gmail or Google Workspace accounts as you need
 - **Unified email search** — search across all accounts simultaneously with Gmail's full query syntax
 - **Full read access** — read individual messages and entire threads
+- **Attachments** — download attachments from emails and attach files to outgoing messages and drafts
 - **Send & draft** — compose and send emails, or save drafts, from any account
 - **Label management** — list labels, mark as read/unread, star messages
 - **Google Calendar** — list calendars, browse upcoming events, search by keyword
@@ -115,12 +116,18 @@ All tools will appear automatically.
 | `gmail_search` | Search emails using Gmail query syntax (one or all accounts) |
 | `gmail_read_message` | Read the full content of a message |
 | `gmail_read_thread` | Read all messages in a thread |
-| `gmail_send` | Send an email from a specific account |
-| `gmail_create_draft` | Save an email as a draft |
+| `gmail_get_attachment` | Download an attachment from a message |
+| `gmail_reply` | Reply to a message within its thread |
+| `gmail_forward` | Forward a message (with attachments) to another recipient |
+| `gmail_send` | Send a new email (with optional attachments) |
+| `gmail_create_draft` | Save a draft (with optional attachments) |
 | `gmail_list_drafts` | List drafts in an account |
 | `gmail_list_labels` | List all labels and folders |
+| `gmail_create_label` | Create a new label (supports nesting, e.g. `Clients/Acme`) |
 | `gmail_modify_labels` | Add or remove labels (mark read/unread, star, etc.) |
-| `gmail_trash` | Move a message to trash |
+| `gmail_archive` | Archive a message (remove from Inbox) |
+| `gmail_modify_thread_labels` | Add or remove labels on an entire thread at once |
+| `gmail_archive_thread` | Archive an entire thread |
 
 ### Google Calendar
 
@@ -130,6 +137,9 @@ All tools will appear automatically.
 | `calendar_list_events` | List upcoming events, optionally filtered by date range |
 | `calendar_search` | Search events by keyword (title, description, location, attendees) |
 | `calendar_get_event` | Get full details of a specific event |
+| `calendar_create_event` | Create a new event (with optional attendees) |
+| `calendar_update_event` | Update an existing event (partial updates supported) |
+| `calendar_delete_event` | Delete an event (notifies attendees) |
 
 ## Usage Examples
 
@@ -139,6 +149,8 @@ Once connected, you can ask Claude things like:
 - *"Do I have any unread emails in my work account?"*
 - *"Search for invoices received in the last month across all my accounts"*
 - *"Read the last email from John in my personal account"*
+- *"Reply to that customer support email and let them know we're looking into it"*
+- *"Forward that invoice to accounting@company.com"*
 - *"Draft a reply to the budget email in my work account"*
 - *"Mark all emails from newsletter@example.com as read"*
 
@@ -147,6 +159,9 @@ Once connected, you can ask Claude things like:
 - *"Search for events related to 'product launch' in my personal calendar"*
 - *"List all my calendars in my work account"*
 - *"What are the details of tomorrow's standup?"*
+- *"Schedule a 30-minute follow-up call with jane@client.com next Tuesday at 2pm"*
+- *"Move the investor meeting to Thursday and add our CFO"*
+- *"Cancel the team lunch on Friday"*
 
 ## Adding a New Account
 
