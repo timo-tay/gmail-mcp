@@ -231,6 +231,11 @@ async def list_tools() -> list[types.Tool]:
                         "items": {"type": "string"},
                         "description": "List of absolute file paths to attach",
                     },
+                    "draft": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, save as a draft reply in the correct thread instead of sending. Use this when the user has not explicitly approved sending yet.",
+                    },
                 },
                 "required": ["account", "message_id", "body"],
             },
@@ -264,6 +269,11 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "cc": {"type": "string", "description": "CC recipients, comma-separated"},
                     "bcc": {"type": "string", "description": "BCC recipients, comma-separated"},
+                    "draft": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, save as a draft instead of sending. Use this when the user has not explicitly approved sending yet.",
+                    },
                 },
                 "required": ["account", "message_id", "to"],
             },
@@ -290,6 +300,11 @@ async def list_tools() -> list[types.Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of absolute file paths to attach",
+                    },
+                    "draft": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, save as a draft instead of sending. Use this when the user has not explicitly approved sending yet.",
                     },
                 },
                 "required": ["account", "to", "subject", "body"],
@@ -706,13 +721,22 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
         # ---- gmail_reply --------------------------------------------------
         elif name == "gmail_reply":
             svc = _get_service(args["account"])
+            is_draft = bool(args.get("draft", False))
             result = svc.reply(
                 message_id=args["message_id"],
                 body=args["body"],
                 cc=args.get("cc", ""),
                 bcc=args.get("bcc", ""),
                 attachment_paths=args.get("attachments"),
+                draft=is_draft,
             )
+            if is_draft:
+                return _fmt({
+                    "status": "draft_saved",
+                    "draft_id": result.get("id"),
+                    "message_id": result.get("message", {}).get("id"),
+                    "thread_id": result.get("message", {}).get("threadId"),
+                })
             return _fmt({
                 "status": "replied",
                 "message_id": result.get("id"),
@@ -722,13 +746,22 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
         # ---- gmail_forward ------------------------------------------------
         elif name == "gmail_forward":
             svc = _get_service(args["account"])
+            is_draft = bool(args.get("draft", False))
             result = svc.forward(
                 message_id=args["message_id"],
                 to=args["to"],
                 body=args.get("body", ""),
                 cc=args.get("cc", ""),
                 bcc=args.get("bcc", ""),
+                draft=is_draft,
             )
+            if is_draft:
+                return _fmt({
+                    "status": "draft_saved",
+                    "draft_id": result.get("id"),
+                    "message_id": result.get("message", {}).get("id"),
+                    "thread_id": result.get("message", {}).get("threadId"),
+                })
             return _fmt({
                 "status": "forwarded",
                 "message_id": result.get("id"),
@@ -738,6 +771,7 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
         # ---- gmail_send ---------------------------------------------------
         elif name == "gmail_send":
             svc = _get_service(args["account"])
+            is_draft = bool(args.get("draft", False))
             result = svc.send_message(
                 to=args["to"],
                 subject=args["subject"],
@@ -745,7 +779,15 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
                 cc=args.get("cc", ""),
                 bcc=args.get("bcc", ""),
                 attachment_paths=args.get("attachments"),
+                draft=is_draft,
             )
+            if is_draft:
+                return _fmt({
+                    "status": "draft_saved",
+                    "draft_id": result.get("id"),
+                    "message_id": result.get("message", {}).get("id"),
+                    "thread_id": result.get("message", {}).get("threadId"),
+                })
             return _fmt({
                 "status": "sent",
                 "message_id": result.get("id"),

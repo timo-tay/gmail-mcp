@@ -163,6 +163,7 @@ class GmailService:
         cc: str = "",
         bcc: str = "",
         attachment_paths: Optional[List[str]] = None,
+        draft: bool = False,
     ) -> Dict[str, Any]:
         original = self.get_message(message_id)
         thread_id = original["threadId"]
@@ -184,9 +185,13 @@ class GmailService:
         msg["In-Reply-To"] = orig_message_id
         msg["References"] = references
 
+        message_body = {"raw": self._encode(msg), "threadId": thread_id}
+        if draft:
+            return self.service.users().drafts().create(
+                userId="me", body={"message": message_body}
+            ).execute()
         return self.service.users().messages().send(
-            userId="me",
-            body={"raw": self._encode(msg), "threadId": thread_id},
+            userId="me", body=message_body,
         ).execute()
 
     def forward(
@@ -196,6 +201,7 @@ class GmailService:
         body: str = "",
         cc: str = "",
         bcc: str = "",
+        draft: bool = False,
     ) -> Dict[str, Any]:
         original = self.get_message(message_id)
         orig_subject = original["subject"]
@@ -236,8 +242,13 @@ class GmailService:
         if bcc:
             msg["bcc"] = bcc
 
+        message_body = {"raw": self._encode(msg)}
+        if draft:
+            return self.service.users().drafts().create(
+                userId="me", body={"message": message_body}
+            ).execute()
         return self.service.users().messages().send(
-            userId="me", body={"raw": self._encode(msg)}
+            userId="me", body=message_body
         ).execute()
 
     def send_message(
@@ -248,10 +259,16 @@ class GmailService:
         cc: str = "",
         bcc: str = "",
         attachment_paths: Optional[List[str]] = None,
+        draft: bool = False,
     ) -> Dict[str, Any]:
         msg = self._build_message(to, subject, body, cc, bcc, attachment_paths)
+        message_body = {"raw": self._encode(msg)}
+        if draft:
+            return self.service.users().drafts().create(
+                userId="me", body={"message": message_body}
+            ).execute()
         return self.service.users().messages().send(
-            userId="me", body={"raw": self._encode(msg)}
+            userId="me", body=message_body
         ).execute()
 
     def create_draft(
