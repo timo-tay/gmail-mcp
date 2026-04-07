@@ -217,28 +217,55 @@ class GmailService:
         orig_from = original["from"]
         orig_date = original["date"]
         orig_to = original["to"]
-        orig_body = original["body"]
+        orig_body_html = original.get("body_html") or ""
+        orig_body_plain = original.get("body_plain") or original.get("body") or ""
 
         subject = orig_subject if orig_subject.lower().startswith("fwd:") else f"Fwd: {orig_subject}"
 
-        forwarded_header = (
-            "<br><br>---------- Forwarded message ----------<br>"
-            f"From: {orig_from}<br>"
-            f"Date: {orig_date}<br>"
-            f"Subject: {orig_subject}<br>"
-            f"To: {orig_to}<br><br>"
+        def _esc(s: str) -> str:
+            return (
+                s.replace("&", "&amp;")
+                 .replace("<", "&lt;")
+                 .replace(">", "&gt;")
+            )
+
+        # Build HTML forward: preserve original HTML inside a Gmail-style blockquote.
+        forwarded_header_html = (
+            "<br><br><div class=\"gmail_quote\">"
+            "---------- Forwarded message ----------<br>"
+            f"From: {_esc(orig_from)}<br>"
+            f"Date: {_esc(orig_date)}<br>"
+            f"Subject: {_esc(orig_subject)}<br>"
+            f"To: {_esc(orig_to)}<br><br>"
         )
-        full_body = f"{body}{forwarded_header}{orig_body}"
+        if orig_body_html:
+            original_html_block = orig_body_html
+        else:
+            # No original HTML available — escape the plain text and use <pre> to preserve whitespace.
+            original_html_block = f"<pre style=\"white-space: pre-wrap; font-family: inherit;\">{_esc(orig_body_plain)}</pre>"
+        full_body_html = f"{body}{forwarded_header_html}{original_html_block}</div>"
+
+        # Plain-text alternative: use the original's plain text (or a stripped version of the HTML).
+        user_body_plain = self._strip_html(body) if body else ""
+        orig_plain_for_alt = orig_body_plain or (self._html_to_readable(orig_body_html) if orig_body_html else "")
+        full_body_plain = (
+            f"{user_body_plain}\n\n"
+            "---------- Forwarded message ----------\n"
+            f"From: {orig_from}\n"
+            f"Date: {orig_date}\n"
+            f"Subject: {orig_subject}\n"
+            f"To: {orig_to}\n\n"
+            f"{orig_plain_for_alt}"
+        )
 
         # Fetch original attachments in memory and attach them
         raw_msg = self._get_raw_message(message_id, format="full")
         attachment_parts = self._get_attachment_parts(raw_msg)
 
-        plain_text = self._strip_html(full_body)
         msg = MIMEMultipart("mixed")
         alt_part = MIMEMultipart("alternative")
-        alt_part.attach(MIMEText(plain_text, "plain"))
-        alt_part.attach(MIMEText(full_body, "html"))
+        alt_part.attach(MIMEText(full_body_plain, "plain"))
+        alt_part.attach(MIMEText(full_body_html, "html"))
         msg.attach(alt_part)
 
         for apart in attachment_parts:
@@ -383,7 +410,14 @@ class GmailService:
         for h in payload.get("headers", []):
             headers[h["name"].lower()] = h["value"]
 
-        body = self._extract_body(payload)
+        parts = self._extract_body_parts(payload)
+        body_html = parts.get("html", "")
+        body_plain = parts.get("plain", "")
+        # Human-readable body: prefer stripped HTML if present, else plain text.
+        if body_html:
+            body = self._html_to_readable(body_html)
+        else:
+            body = body_plain
         attachments = self._extract_attachments(payload)
 
         return {
@@ -399,6 +433,8 @@ class GmailService:
             "messageId": headers.get("message-id", ""),
             "references": headers.get("references", ""),
             "body": body,
+            "body_html": body_html,
+            "body_plain": body_plain,
             "attachments": attachments,
         }
 
@@ -447,69 +483,80 @@ class GmailService:
             attachments.extend(self._extract_attachments(part))
         return attachments
 
-    def _extract_body(self, payload: Dict[str, Any]) -> str:
+    def _extract_body_parts(self, payload: Dict[str, Any]) -> Dict[str, str]:
+        """Walk the MIME tree and return the first text/html and text/plain payloads found.
+
+        Returns {"html": str, "plain": str}. Either may be empty.
+        Attachment parts (those with a filename) are skipped so that e.g. an HTML
+        attachment doesn't get picked up as the body.
+        """
+        result = {"html": "", "plain": ""}
         if not payload:
-            return ""
+            return result
 
-        mime_type = payload.get("mimeType", "")
-        body_data = payload.get("body", {}).get("data", "")
+        def walk(part: Dict[str, Any]) -> None:
+            mime_type = part.get("mimeType", "")
+            body = part.get("body", {})
+            filename = part.get("filename", "") or ""
+            data = body.get("data", "")
 
-        if body_data:
-            decoded = base64.urlsafe_b64decode(body_data.encode()).decode(
-                "utf-8", errors="replace"
-            )
-            if "html" in mime_type:
-                # Remove <style> and <script> blocks including their contents
-                decoded = re.sub(
-                    r"<style\b[^>]*>.*?</style>", " ", decoded,
-                    flags=re.DOTALL | re.IGNORECASE,
+            if data and not filename:
+                decoded = base64.urlsafe_b64decode(data.encode()).decode(
+                    "utf-8", errors="replace"
                 )
-                decoded = re.sub(
-                    r"<script\b[^>]*>.*?</script>", " ", decoded,
-                    flags=re.DOTALL | re.IGNORECASE,
-                )
-                decoded = re.sub(r"<[^>]+>", " ", decoded)
-                decoded = (
-                    decoded.replace("&nbsp;", " ")
-                    .replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .replace("&amp;", "&")
-                    .replace("&quot;", '"')
-                    .replace("&apos;", "'")
-                    .replace("&#39;", "'")
-                    .replace("&#160;", " ")
-                    .replace("&#8203;", "")
-                )
-                # Decode remaining numeric entities (&#NNN; and &#xHH;)
-                decoded = re.sub(
-                    r"&#(\d+);",
-                    lambda m: chr(int(m.group(1))) if int(m.group(1)) < 0x110000 else m.group(0),
-                    decoded,
-                )
-                decoded = re.sub(
-                    r"&#[xX]([0-9a-fA-F]+);",
-                    lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) < 0x110000 else m.group(0),
-                    decoded,
-                )
-                decoded = re.sub(r"\s+", " ", decoded)
-            return decoded.strip()
+                if mime_type == "text/html" and not result["html"]:
+                    result["html"] = decoded
+                elif mime_type == "text/plain" and not result["plain"]:
+                    result["plain"] = decoded
 
-        parts = payload.get("parts", [])
+            for child in part.get("parts", []) or []:
+                walk(child)
 
-        # Prefer text/plain parts
-        for part in parts:
-            if part.get("mimeType") == "text/plain":
-                result = self._extract_body(part)
-                if result:
-                    return result
+        walk(payload)
+        return result
 
-        # Fallback: any part that returns content
-        for part in parts:
-            result = self._extract_body(part)
-            if result:
-                return result
+    @staticmethod
+    def _html_to_readable(html: str) -> str:
+        """Convert HTML into a readable plain-text representation for LLM consumption."""
+        decoded = re.sub(
+            r"<style\b[^>]*>.*?</style>", " ", html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        decoded = re.sub(
+            r"<script\b[^>]*>.*?</script>", " ", decoded,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        decoded = re.sub(r"<[^>]+>", " ", decoded)
+        decoded = (
+            decoded.replace("&nbsp;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", '"')
+            .replace("&apos;", "'")
+            .replace("&#39;", "'")
+            .replace("&#160;", " ")
+            .replace("&#8203;", "")
+        )
+        decoded = re.sub(
+            r"&#(\d+);",
+            lambda m: chr(int(m.group(1))) if int(m.group(1)) < 0x110000 else m.group(0),
+            decoded,
+        )
+        decoded = re.sub(
+            r"&#[xX]([0-9a-fA-F]+);",
+            lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) < 0x110000 else m.group(0),
+            decoded,
+        )
+        decoded = re.sub(r"\s+", " ", decoded)
+        return decoded.strip()
 
-        return ""
+    def _extract_body(self, payload: Dict[str, Any]) -> str:
+        """Backward-compat shim: return a readable text version of the body."""
+        parts = self._extract_body_parts(payload)
+        if parts["html"]:
+            return self._html_to_readable(parts["html"])
+        return parts["plain"].strip()
 
     @staticmethod
     def _encode(msg: MIMEText | MIMEMultipart) -> str:
