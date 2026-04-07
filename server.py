@@ -306,6 +306,12 @@ async def list_tools() -> list[types.Tool]:
                         "default": False,
                         "description": "If true, save as a draft instead of sending. Use this when the user has not explicitly approved sending yet.",
                     },
+                    "body_type": {
+                        "type": "string",
+                        "enum": ["html", "plain"],
+                        "default": "html",
+                        "description": "Body content type. Defaults to 'html'. Use 'plain' only for explicit plain-text sends.",
+                    },
                 },
                 "required": ["account", "to", "subject", "body"],
             },
@@ -329,6 +335,12 @@ async def list_tools() -> list[types.Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of absolute file paths to attach",
+                    },
+                    "body_type": {
+                        "type": "string",
+                        "enum": ["html", "plain"],
+                        "default": "html",
+                        "description": "Body content type. Defaults to 'html'. Use 'plain' only for explicit plain-text drafts.",
                     },
                 },
                 "required": ["account", "to", "subject", "body"],
@@ -780,6 +792,7 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
                 bcc=args.get("bcc", ""),
                 attachment_paths=args.get("attachments"),
                 draft=is_draft,
+                body_type=args.get("body_type", "html"),
             )
             if is_draft:
                 return _fmt({
@@ -804,6 +817,7 @@ async def call_tool(name: str, arguments: dict | None) -> list[types.TextContent
                 cc=args.get("cc", ""),
                 bcc=args.get("bcc", ""),
                 attachment_paths=args.get("attachments"),
+                body_type=args.get("body_type", "html"),
             )
             return _fmt({"status": "draft created", "draft_id": result.get("id")})
 

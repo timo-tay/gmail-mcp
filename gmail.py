@@ -115,20 +115,29 @@ class GmailService:
         cc: str = "",
         bcc: str = "",
         attachment_paths: Optional[List[str]] = None,
+        body_type: str = "html",
     ) -> MIMEText | MIMEMultipart:
-        plain_text = self._strip_html(body)
         has_attachments = bool(attachment_paths)
+        is_html = body_type != "plain"
 
-        if has_attachments:
-            msg = MIMEMultipart("mixed")
-            alt_part = MIMEMultipart("alternative")
-            alt_part.attach(MIMEText(plain_text, "plain"))
-            alt_part.attach(MIMEText(body, "html"))
-            msg.attach(alt_part)
+        if is_html:
+            plain_text = self._strip_html(body)
+            if has_attachments:
+                msg = MIMEMultipart("mixed")
+                alt_part = MIMEMultipart("alternative")
+                alt_part.attach(MIMEText(plain_text, "plain"))
+                alt_part.attach(MIMEText(body, "html"))
+                msg.attach(alt_part)
+            else:
+                msg = MIMEMultipart("alternative")
+                msg.attach(MIMEText(plain_text, "plain"))
+                msg.attach(MIMEText(body, "html"))
         else:
-            msg = MIMEMultipart("alternative")
-            msg.attach(MIMEText(plain_text, "plain"))
-            msg.attach(MIMEText(body, "html"))
+            if has_attachments:
+                msg = MIMEMultipart("mixed")
+                msg.attach(MIMEText(body, "plain"))
+            else:
+                msg = MIMEText(body, "plain")
 
         if has_attachments:
             for file_path in attachment_paths:
@@ -260,8 +269,9 @@ class GmailService:
         bcc: str = "",
         attachment_paths: Optional[List[str]] = None,
         draft: bool = False,
+        body_type: str = "html",
     ) -> Dict[str, Any]:
-        msg = self._build_message(to, subject, body, cc, bcc, attachment_paths)
+        msg = self._build_message(to, subject, body, cc, bcc, attachment_paths, body_type=body_type)
         message_body = {"raw": self._encode(msg)}
         if draft:
             return self.service.users().drafts().create(
@@ -279,8 +289,9 @@ class GmailService:
         cc: str = "",
         bcc: str = "",
         attachment_paths: Optional[List[str]] = None,
+        body_type: str = "html",
     ) -> Dict[str, Any]:
-        msg = self._build_message(to, subject, body, cc, bcc, attachment_paths)
+        msg = self._build_message(to, subject, body, cc, bcc, attachment_paths, body_type=body_type)
         return self.service.users().drafts().create(
             userId="me", body={"message": {"raw": self._encode(msg)}}
         ).execute()
@@ -448,6 +459,15 @@ class GmailService:
                 "utf-8", errors="replace"
             )
             if "html" in mime_type:
+                # Remove <style> and <script> blocks including their contents
+                decoded = re.sub(
+                    r"<style\b[^>]*>.*?</style>", " ", decoded,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
+                decoded = re.sub(
+                    r"<script\b[^>]*>.*?</script>", " ", decoded,
+                    flags=re.DOTALL | re.IGNORECASE,
+                )
                 decoded = re.sub(r"<[^>]+>", " ", decoded)
                 decoded = (
                     decoded.replace("&nbsp;", " ")
@@ -455,6 +475,21 @@ class GmailService:
                     .replace("&gt;", ">")
                     .replace("&amp;", "&")
                     .replace("&quot;", '"')
+                    .replace("&apos;", "'")
+                    .replace("&#39;", "'")
+                    .replace("&#160;", " ")
+                    .replace("&#8203;", "")
+                )
+                # Decode remaining numeric entities (&#NNN; and &#xHH;)
+                decoded = re.sub(
+                    r"&#(\d+);",
+                    lambda m: chr(int(m.group(1))) if int(m.group(1)) < 0x110000 else m.group(0),
+                    decoded,
+                )
+                decoded = re.sub(
+                    r"&#[xX]([0-9a-fA-F]+);",
+                    lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) < 0x110000 else m.group(0),
+                    decoded,
                 )
                 decoded = re.sub(r"\s+", " ", decoded)
             return decoded.strip()
